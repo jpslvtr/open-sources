@@ -107,12 +107,7 @@ export function SearchPage() {
           ))}
 
           {totalPages > 1 && (
-            <div style={{
-              display: "flex",
-              justifyContent: "center",
-              gap: "0.5rem",
-              marginTop: "1.5rem",
-            }}>
+            <div className="pagination">
               <button
                 className="btn"
                 disabled={page <= 1}
@@ -121,11 +116,7 @@ export function SearchPage() {
               >
                 prev
               </button>
-              <span style={{
-                fontSize: "11px",
-                color: "var(--fg4)",
-                alignSelf: "center",
-              }}>
+              <span className="pagination-label">
                 {page} / {totalPages.toLocaleString()}
               </span>
               <button

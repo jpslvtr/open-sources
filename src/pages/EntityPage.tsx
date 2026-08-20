@@ -1,12 +1,14 @@
-import { useParams, Link } from "react-router-dom";
+import { useParams, Link, useNavigate } from "react-router-dom";
 import { useEntity, useContributions } from "../hooks/useEntity";
+import { useGraph } from "../hooks/useGraph";
 import { SectionHeader } from "../components/SectionHeader";
 import { StatTiles, entityStatsToTiles } from "../components/StatTiles";
 import { ContributionTable } from "../components/ContributionTable";
 import { DataFreshness } from "../components/DataFreshness";
+import { NetworkGraph } from "../components/NetworkGraph";
 import { Skeleton, SkeletonRows } from "../components/Skeleton";
 import { formatCurrency } from "../utils/format";
-import { useState } from "react";
+import { useState, useRef, useEffect, useCallback } from "react";
 
 const PARTY_LABELS: Record<string, string> = {
   DEM: "Democrat",
@@ -18,10 +20,32 @@ const PARTY_LABELS: Record<string, string> = {
 
 export function EntityPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
   const entityId = id ? decodeURIComponent(id) : undefined;
   const { entity, stats, dataAsOf, loading, error } = useEntity(entityId);
   const [direction, setDirection] = useState<"received" | "given">("received");
   const contributions = useContributions(entityId, direction);
+  const graphResult = useGraph(entityId, 1);
+  const graphContainerRef = useRef<HTMLDivElement>(null);
+  const [graphWidth, setGraphWidth] = useState(700);
+
+  useEffect(() => {
+    const el = graphContainerRef.current;
+    if (!el) return;
+    const measure = () => setGraphWidth(el.clientWidth);
+    measure();
+    const obs = new ResizeObserver(measure);
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
+
+  const handleNodeClick = useCallback((nodeId: string) => {
+    if (nodeId.startsWith("fec:")) {
+      navigate(`/entity/${encodeURIComponent(nodeId)}`);
+    } else if (nodeId.startsWith("name:")) {
+      navigate(`/?q=${encodeURIComponent(nodeId.replace(/^name:/, ""))}`);
+    }
+  }, [navigate]);
 
   if (loading) {
     return (
@@ -44,9 +68,9 @@ export function EntityPage() {
   if (error || !entity) {
     return (
       <div className="page">
-        <Link to="/" className="btn" style={{ marginBottom: "1.5rem", display: "inline-block" }}>
-          back
-        </Link>
+        <nav className="breadcrumb">
+          <Link to="/">search</Link>
+        </nav>
         <div style={{ color: "var(--fg3)", textAlign: "center", padding: "3rem 0" }}>
           {error ?? "entity not found"}
         </div>
@@ -64,13 +88,11 @@ export function EntityPage() {
 
   return (
     <div className="page">
-      <Link
-        to="/"
-        className="btn fade-in"
-        style={{ marginBottom: "1.5rem", display: "inline-block" }}
-      >
-        back
-      </Link>
+      <nav className="breadcrumb fade-in">
+        <Link to="/">search</Link>
+        <span className="breadcrumb-sep">/</span>
+        <span>{entity.canonicalName.toLowerCase()}</span>
+      </nav>
 
       <div className="fade-in" style={{ animationDelay: "35ms", marginBottom: "1.5rem" }}>
         <h1
@@ -93,6 +115,43 @@ export function EntityPage() {
       {stats && (
         <StatTiles stats={entityStatsToTiles(stats)} baseDelay={70} />
       )}
+
+      {/* Inline graph preview */}
+      <div className="fade-in" style={{ animationDelay: "105ms", marginBottom: "1.5rem" }}>
+        <div style={{
+          display: "flex", alignItems: "baseline", justifyContent: "space-between",
+          marginBottom: "0.5rem",
+        }}>
+          <span className="section-label">money network</span>
+          <Link
+            to={`/entity/${encodeURIComponent(entity.id)}/graph`}
+            className="btn"
+          >
+            expand
+          </Link>
+        </div>
+        <div ref={graphContainerRef} className="graph-preview">
+          {graphResult.loading ? (
+            <div style={{ padding: "2rem" }}>
+              <SkeletonRows count={3} />
+            </div>
+          ) : graphResult.data && graphResult.data.nodes.length > 1 ? (
+            <NetworkGraph
+              data={graphResult.data}
+              onNodeClick={handleNodeClick}
+              width={graphWidth}
+              height={350}
+            />
+          ) : (
+            <div style={{
+              textAlign: "center", color: "var(--fg4)", fontSize: "12px",
+              padding: "2rem 0",
+            }}>
+              no network data
+            </div>
+          )}
+        </div>
+      </div>
 
       {stats && stats.cycles.length > 0 && (
         <div className="fade-in" style={{ animationDelay: "140ms", marginBottom: "1.5rem" }}>
@@ -151,12 +210,7 @@ export function EntityPage() {
           />
         )}
         {contributions.total > 30 && (
-          <div style={{
-            display: "flex",
-            justifyContent: "center",
-            gap: "0.5rem",
-            marginTop: "1rem",
-          }}>
+          <div className="pagination">
             <button
               className="btn"
               disabled={contributions.page <= 1}
@@ -165,7 +219,7 @@ export function EntityPage() {
             >
               prev
             </button>
-            <span style={{ fontSize: "11px", color: "var(--fg4)", alignSelf: "center" }}>
+            <span className="pagination-label">
               {contributions.page} / {Math.ceil(contributions.total / 30)}
             </span>
             <button
@@ -180,16 +234,6 @@ export function EntityPage() {
             </button>
           </div>
         )}
-      </div>
-
-      <div className="fade-in" style={{ animationDelay: "245ms" }}>
-        <Link
-          to={`/entity/${encodeURIComponent(entity.id)}/graph`}
-          className="btn"
-          style={{ display: "inline-block" }}
-        >
-          view money network
-        </Link>
       </div>
     </div>
   );

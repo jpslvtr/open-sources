@@ -4,6 +4,8 @@ import { NetworkGraph } from "../components/NetworkGraph";
 import { SkeletonRows } from "../components/Skeleton";
 import { useState, useRef, useEffect, useCallback } from "react";
 
+const DEPTH_OPTIONS = [1, 2, 3, 4];
+
 export function GraphPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
@@ -11,14 +13,15 @@ export function GraphPage() {
   const [depth, setDepth] = useState(2);
   const { data, loading, error } = useGraph(entityId, depth);
   const containerRef = useRef<HTMLDivElement>(null);
-  const [dims, setDims] = useState({ width: 800, height: 500 });
+  const [dims, setDims] = useState({ width: 900, height: 600 });
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
     const measure = () => {
       const w = el.clientWidth;
-      setDims({ width: w, height: Math.max(400, Math.min(600, w * 0.7)) });
+      const vh = window.innerHeight;
+      setDims({ width: w, height: Math.max(450, vh - 200) });
     };
     measure();
     const obs = new ResizeObserver(measure);
@@ -38,15 +41,20 @@ export function GraphPage() {
 
   return (
     <div className="graph-page">
-      <div style={{
-        display: "flex", alignItems: "baseline", gap: "0.75rem", marginBottom: "1rem",
-      }}>
-        <Link
-          to={entityId ? `/entity/${encodeURIComponent(entityId)}` : "/"}
-          className="btn"
-        >
-          back
+      <nav className="breadcrumb fade-in">
+        <Link to="/">search</Link>
+        <span className="breadcrumb-sep">/</span>
+        <Link to={entityId ? `/entity/${encodeURIComponent(entityId)}` : "/"}>
+          {centerName.toLowerCase()}
         </Link>
+        <span className="breadcrumb-sep">/</span>
+        <span>network</span>
+      </nav>
+
+      <div style={{
+        display: "flex", alignItems: "center", justifyContent: "space-between",
+        marginBottom: "1rem", flexWrap: "wrap", gap: "0.75rem",
+      }}>
         <h1
           className="fade-in"
           style={{
@@ -56,28 +64,25 @@ export function GraphPage() {
             lineHeight: 1.2,
           }}
         >
-          {centerName}
+          money network
         </h1>
-      </div>
-
-      <div className="fade-in" style={{ animationDelay: "35ms", marginBottom: "0.75rem" }}>
-        <div style={{
-          display: "flex", alignItems: "center", justifyContent: "space-between",
+        <div className="fade-in" style={{
+          animationDelay: "35ms",
+          display: "flex", alignItems: "center", gap: "0.75rem",
         }}>
-          <span className="section-label">money network</span>
-          <div className="filter-row" style={{ marginBottom: 0 }}>
-            <button
-              className={`btn${depth === 1 ? " active" : ""}`}
-              onClick={() => setDepth(1)}
-            >
-              1-hop
-            </button>
-            <button
-              className={`btn${depth === 2 ? " active" : ""}`}
-              onClick={() => setDepth(2)}
-            >
-              2-hop
-            </button>
+          <span style={{ fontSize: "10px", color: "var(--fg4)", textTransform: "uppercase", letterSpacing: "0.5px" }}>
+            depth
+          </span>
+          <div className="depth-selector">
+            {DEPTH_OPTIONS.map((d) => (
+              <button
+                key={d}
+                className={`depth-btn${depth === d ? " active" : ""}`}
+                onClick={() => setDepth(d)}
+              >
+                {d}
+              </button>
+            ))}
           </div>
         </div>
       </div>
@@ -101,16 +106,18 @@ export function GraphPage() {
             <div style={{
               textAlign: "center", color: "var(--fg4)", fontSize: "11px", marginTop: "1rem",
             }}>
-              loading network data...
+              {depth >= 3 ? "expanding deep connections..." : "loading network data..."}
             </div>
           </div>
         ) : data && data.nodes.length > 0 ? (
-          <NetworkGraph
-            data={data}
-            onNodeClick={handleNodeClick}
-            width={dims.width}
-            height={dims.height}
-          />
+          <div className="graph-wrap">
+            <NetworkGraph
+              data={data}
+              onNodeClick={handleNodeClick}
+              width={dims.width}
+              height={dims.height}
+            />
+          </div>
         ) : !error ? (
           <div style={{
             textAlign: "center", color: "var(--fg4)", fontSize: "13px",
@@ -125,9 +132,10 @@ export function GraphPage() {
         <div className="fade-in" style={{
           animationDelay: "105ms", marginTop: "0.5rem",
           fontSize: "10px", color: "var(--fg4)",
+          display: "flex", justifyContent: "space-between",
         }}>
-          {data.nodes.length} entities - {data.edges.length} connections
-          - drag to rearrange, scroll to zoom, click to navigate
+          <span>{data.nodes.length} entities, {data.edges.length} connections</span>
+          <span>drag to rearrange, scroll to zoom, click to navigate</span>
         </div>
       )}
     </div>

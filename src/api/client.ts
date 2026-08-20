@@ -20,7 +20,6 @@ function normalizeName(raw: string): string {
     const [last, ...rest] = name.split(",");
     const firstParts = rest.join(" ").trim().split(/\s+/).filter((p) => !suffixes.has(p));
     const lastParts = last.trim().split(/\s+/).filter((p) => !suffixes.has(p));
-    // Strip middle initials (single letters)
     const first = firstParts.filter((p) => p.length > 1).join(" ");
     const lastClean = lastParts.join(" ");
     return [first, lastClean].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
@@ -34,7 +33,6 @@ interface FecResponse<T> {
   pagination: { page: number; per_page: number; count: number; pages: number };
 }
 
-// Deduplicate and aggregate FEC totals by election cycle
 function aggregateCycles(totals: Record<string, unknown>[]) {
   const byCycle = new Map<number, { received: number; given: number }>();
   for (const t of totals) {
@@ -88,7 +86,6 @@ export async function search(params: {
   const searchCandidates = filters.type === "all" || filters.type === "candidate";
   const searchCommittees = filters.type === "all" || filters.type === "committee";
 
-  // /candidates/search/ requires q; /candidates/ works without it
   const candidateEndpoint = hasQuery ? "/candidates/search/" : "/candidates/";
   const requests: Promise<FecResponse<Record<string, unknown>>>[] = [];
   if (searchCandidates) requests.push(fecFetch(candidateEndpoint, fecParams));
@@ -312,7 +309,6 @@ export async function getContributions(
     };
   }
 
-  // Disbursements
   const res = await fecFetch<Record<string, unknown>>("/schedules/schedule_b/", {
     committee_id: committeeId,
     sort: "-disbursement_amount",
@@ -409,11 +405,102 @@ async function aggregateRecipients(
   return Array.from(grouped.values()).sort((a, b) => b.total - a.total);
 }
 
+// Per-hop parameters: fewer connections and expansions at deeper levels
+function hopParams(hop: number) {
+  return {
+    connectionsPerSide: Math.max(3, 14 - hop * 3),
+    sampleSize: Math.max(15, 55 - hop * 10),
+    expandLimit: Math.max(1, 5 - hop),
+  };
+}
+
+// Expand a single committee node: fetch its contributors and recipients,
+// add them to the graph, and return committees eligible for further expansion.
+async function expandCommittee(
+  commId: string,
+  parentNodeId: string,
+  centerId: string,
+  currentDepth: number,
+  nodes: Map<string, GraphNode>,
+  edgeMap: Map<string, GraphEdge>,
+  expanded: Set<string>,
+  limit: number,
+): Promise<{ id: string; committeeId: string }[]> {
+  if (expanded.has(commId)) return [];
+  expanded.add(commId);
+
+  const params = hopParams(currentDepth);
+  const [contribResult, recipResult] = await Promise.allSettled([
+    aggregateContributors(commId, params.sampleSize),
+    aggregateRecipients(commId, params.sampleSize),
+  ]);
+
+  const newCommittees: { id: string; committeeId: string }[] = [];
+  let expandCount = 0;
+
+  if (contribResult.status === "fulfilled") {
+    for (const c of contribResult.value.slice(0, params.connectionsPerSide)) {
+      if (nodes.size >= limit) break;
+      const nodeId = c.entityId ?? `name:${normalizeName(c.name)}`;
+      if (nodeId === centerId || nodeId === parentNodeId) continue;
+      if (!nodes.has(nodeId)) {
+        nodes.set(nodeId, {
+          id: nodeId,
+          name: c.entityId ? c.name : normalizeName(c.name),
+          type: c.entityId?.startsWith("fec:C") ? "committee" : "individual",
+          party: null,
+          totalFlow: c.total,
+          depth: currentDepth,
+        });
+      }
+      const ek = `${nodeId}>${parentNodeId}`;
+      if (!edgeMap.has(ek)) {
+        edgeMap.set(ek, { source: nodeId, target: parentNodeId, amount: c.total, count: c.count });
+      }
+      if (c.entityId?.startsWith("fec:C") && expandCount < params.expandLimit
+          && !expanded.has(c.entityId.replace(/^fec:/, ""))) {
+        newCommittees.push({ id: c.entityId, committeeId: c.entityId.replace(/^fec:/, "") });
+        expandCount++;
+      }
+    }
+  }
+
+  if (recipResult.status === "fulfilled") {
+    for (const r of recipResult.value.slice(0, params.connectionsPerSide)) {
+      if (nodes.size >= limit) break;
+      const nodeId = r.entityId ?? `name:${normalizeName(r.name)}`;
+      if (nodeId === centerId || nodeId === parentNodeId) continue;
+      if (!nodes.has(nodeId)) {
+        nodes.set(nodeId, {
+          id: nodeId,
+          name: r.entityId ? r.name : normalizeName(r.name),
+          type: r.entityId?.startsWith("fec:C") ? "committee" : "individual",
+          party: null,
+          totalFlow: r.total,
+          depth: currentDepth,
+        });
+      }
+      const ek = `${parentNodeId}>${nodeId}`;
+      if (!edgeMap.has(ek)) {
+        edgeMap.set(ek, { source: parentNodeId, target: nodeId, amount: r.total, count: r.count });
+      }
+      if (r.entityId?.startsWith("fec:C") && expandCount < params.expandLimit
+          && !expanded.has(r.entityId.replace(/^fec:/, ""))
+          && !newCommittees.some(nc => nc.id === r.entityId)) {
+        newCommittees.push({ id: r.entityId, committeeId: r.entityId.replace(/^fec:/, "") });
+        expandCount++;
+      }
+    }
+  }
+
+  return newCommittees;
+}
+
 export async function getGraph(
   entityId: string,
   depth = 2,
   _minAmount = 0,
-  limit = 100,
+  limit = 150,
 ): Promise<GraphResponse> {
   void _minAmount;
   const sourceId = entityId.replace(/^fec:/, "");
@@ -428,6 +515,7 @@ export async function getGraph(
 
   const nodes = new Map<string, GraphNode>();
   const edgeMap = new Map<string, GraphEdge>();
+  const expanded = new Set<string>();
 
   const centerInfo = await getEntity(entityId);
   nodes.set(entityId, {
@@ -439,121 +527,27 @@ export async function getGraph(
     depth: 0,
   });
 
-  const [contribResult, recipResult] = await Promise.allSettled([
-    aggregateContributors(committeeId, 50),
-    aggregateRecipients(committeeId, 50),
-  ]);
+  // Hop 1: expand center committee
+  const hop1Queue = await expandCommittee(
+    committeeId, entityId, entityId, 1,
+    nodes, edgeMap, expanded, limit,
+  );
 
-  const HOP1_LIMIT = 12;
-  const HOP2_EXPAND = 3;
-  const hop2Queue: { id: string; committeeId: string }[] = [];
-
-  if (contribResult.status === "fulfilled") {
-    let expandCount = 0;
-    for (const c of contribResult.value.slice(0, HOP1_LIMIT)) {
-      const nodeId = c.entityId ?? `name:${normalizeName(c.name)}`;
-      if (nodeId === entityId) continue;
-      if (!nodes.has(nodeId)) {
-        nodes.set(nodeId, {
-          id: nodeId,
-          name: c.entityId ? c.name : normalizeName(c.name),
-          type: c.entityId?.startsWith("fec:C") ? "committee" : "individual",
-          party: null,
-          totalFlow: c.total,
-          depth: 1,
-        });
-      }
-      edgeMap.set(`${nodeId}>${entityId}`, {
-        source: nodeId, target: entityId, amount: c.total, count: c.count,
-      });
-      if (c.entityId?.startsWith("fec:C") && expandCount < HOP2_EXPAND) {
-        hop2Queue.push({ id: c.entityId, committeeId: c.entityId.replace(/^fec:/, "") });
-        expandCount++;
-      }
-    }
-  }
-
-  if (recipResult.status === "fulfilled") {
-    let expandCount = 0;
-    for (const r of recipResult.value.slice(0, HOP1_LIMIT)) {
-      const nodeId = r.entityId ?? `name:${normalizeName(r.name)}`;
-      if (nodeId === entityId) continue;
-      if (!nodes.has(nodeId)) {
-        nodes.set(nodeId, {
-          id: nodeId,
-          name: r.entityId ? r.name : normalizeName(r.name),
-          type: r.entityId?.startsWith("fec:C") ? "committee" : "individual",
-          party: null,
-          totalFlow: r.total,
-          depth: 1,
-        });
-      }
-      edgeMap.set(`${entityId}>${nodeId}`, {
-        source: entityId, target: nodeId, amount: r.total, count: r.count,
-      });
-      if (r.entityId?.startsWith("fec:C") && expandCount < HOP2_EXPAND
-          && !hop2Queue.some((h) => h.id === r.entityId)) {
-        hop2Queue.push({ id: r.entityId, committeeId: r.entityId.replace(/^fec:/, "") });
-        expandCount++;
-      }
-    }
-  }
-
-  if (depth >= 2 && hop2Queue.length > 0) {
-    const hop2Results = await Promise.allSettled(
-      hop2Queue.map(async (comm) => {
-        const [h2c, h2r] = await Promise.allSettled([
-          aggregateContributors(comm.committeeId, 20),
-          aggregateRecipients(comm.committeeId, 20),
-        ]);
-        return { parentId: comm.id, contributors: h2c, recipients: h2r };
-      }),
+  // Hops 2..depth: expand committees discovered at each level
+  let currentQueue = hop1Queue;
+  for (let hop = 2; hop <= depth && currentQueue.length > 0 && nodes.size < limit; hop++) {
+    const results = await Promise.allSettled(
+      currentQueue.map(comm =>
+        expandCommittee(comm.committeeId, comm.id, entityId, hop, nodes, edgeMap, expanded, limit)
+      ),
     );
-
-    for (const result of hop2Results) {
-      if (result.status !== "fulfilled") continue;
-      const { parentId, contributors, recipients } = result.value;
-
-      if (contributors.status === "fulfilled") {
-        for (const c of contributors.value.slice(0, 5)) {
-          if (nodes.size >= limit) break;
-          const nodeId = c.entityId ?? `name:${normalizeName(c.name)}`;
-          if (nodeId === entityId || nodeId === parentId) continue;
-          if (!nodes.has(nodeId)) {
-            nodes.set(nodeId, {
-              id: nodeId,
-              name: c.entityId ? c.name : normalizeName(c.name),
-              type: c.entityId?.startsWith("fec:C") ? "committee" : "individual",
-              party: null, totalFlow: c.total, depth: 2,
-            });
-          }
-          const ek = `${nodeId}>${parentId}`;
-          if (!edgeMap.has(ek)) {
-            edgeMap.set(ek, { source: nodeId, target: parentId, amount: c.total, count: c.count });
-          }
-        }
-      }
-
-      if (recipients.status === "fulfilled") {
-        for (const r of recipients.value.slice(0, 5)) {
-          if (nodes.size >= limit) break;
-          const nodeId = r.entityId ?? `name:${normalizeName(r.name)}`;
-          if (nodeId === entityId || nodeId === parentId) continue;
-          if (!nodes.has(nodeId)) {
-            nodes.set(nodeId, {
-              id: nodeId,
-              name: r.entityId ? r.name : normalizeName(r.name),
-              type: r.entityId?.startsWith("fec:C") ? "committee" : "individual",
-              party: null, totalFlow: r.total, depth: 2,
-            });
-          }
-          const ek = `${parentId}>${nodeId}`;
-          if (!edgeMap.has(ek)) {
-            edgeMap.set(ek, { source: parentId, target: nodeId, amount: r.total, count: r.count });
-          }
-        }
+    const nextQueue: { id: string; committeeId: string }[] = [];
+    for (const result of results) {
+      if (result.status === "fulfilled") {
+        nextQueue.push(...result.value);
       }
     }
+    currentQueue = nextQueue;
   }
 
   return {

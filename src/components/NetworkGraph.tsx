@@ -26,7 +26,7 @@ interface SimLink {
 
 function nodeRadius(node: SimNode, maxFlow: number): number {
   if (node.depth === 0) return 14;
-  return Math.max(4, Math.sqrt(node.totalFlow / Math.max(maxFlow, 1)) * 12);
+  return Math.max(3, Math.sqrt(node.totalFlow / Math.max(maxFlow, 1)) * 12);
 }
 
 export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
@@ -47,10 +47,11 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
 
     const maxFlow = Math.max(...data.nodes.map((n) => n.totalFlow));
     const maxAmount = Math.max(...data.edges.map((e) => e.amount), 1);
+    const maxDepth = Math.max(...data.nodes.map((n) => n.depth));
 
     const simNodes: SimNode[] = data.nodes.map((n, i) => {
       const angle = (2 * Math.PI * i) / data.nodes.length;
-      const r = n.depth === 0 ? 0 : 50 + n.depth * 40;
+      const r = n.depth === 0 ? 0 : 40 + n.depth * 35;
       return {
         ...n,
         x: width / 2 + Math.cos(angle) * r,
@@ -79,8 +80,33 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
     const link = g.append("g").selectAll("line").data(simLinks).join("line")
       .attr("stroke", "var(--fg4)")
       .attr("stroke-width", (d) => 0.5 + (d.amount / maxAmount) * 2.5)
-      .attr("stroke-opacity", 0.5)
-      .attr("marker-end", "url(#arr)");
+      .attr("stroke-opacity", 0.4)
+      .attr("marker-end", "url(#arr)")
+      .attr("cursor", "pointer");
+
+    // Edge hover
+    link
+      .on("mouseenter", (event: MouseEvent, d: SimLink) => {
+        d3.select(event.currentTarget as SVGLineElement)
+          .attr("stroke-opacity", 1)
+          .attr("stroke", "var(--fg2)");
+        const s = d.source as SimNode;
+        const t = d.target as SimNode;
+        tip.style("display", "block")
+          .style("left", `${event.clientX + 10}px`)
+          .style("top", `${event.clientY - 10}px`)
+          .text(`${s.name} -> ${t.name}: ${formatCurrency(d.amount)} (${d.count} transaction${d.count !== 1 ? "s" : ""})`);
+      })
+      .on("mousemove", (event: MouseEvent) => {
+        tip.style("left", `${event.clientX + 10}px`)
+          .style("top", `${event.clientY - 10}px`);
+      })
+      .on("mouseleave", (event: MouseEvent) => {
+        d3.select(event.currentTarget as SVGLineElement)
+          .attr("stroke-opacity", 0.4)
+          .attr("stroke", "var(--fg4)");
+        tip.style("display", "none");
+      });
 
     // Nodes
     const node = g.append("g").selectAll("circle").data(simNodes).join("circle")
@@ -94,7 +120,7 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
       .attr("stroke-width", 1)
       .attr("cursor", "pointer");
 
-    // Labels (depth 0 and 1 only; depth 2 shown on hover via tooltip)
+    // Labels: show for depth 0 and 1 only
     const label = g.append("g").selectAll("text").data(simNodes).join("text")
       .text((d) => {
         if (d.depth >= 2) return "";
@@ -107,7 +133,7 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
       .attr("pointer-events", "none")
       .attr("font-family", "inherit");
 
-    // Hover
+    // Node hover
     node
       .on("mouseenter", (event: MouseEvent, d: SimNode) => {
         d3.select(event.currentTarget as SVGCircleElement)
@@ -125,25 +151,32 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
         d3.select(event.currentTarget as SVGCircleElement)
           .attr("stroke", "var(--bg)").attr("stroke-width", 1);
         tip.style("display", "none");
-      })
-    // Force simulation
+      });
+
+    // Force simulation - scale parameters based on graph depth and node count
     const compact = width < 500;
+    const nodeCount = simNodes.length;
+    const chargeScale = Math.max(0.4, 1 - nodeCount / 300);
+
     const sim = d3.forceSimulation<SimNode>(simNodes)
       .force("link", d3.forceLink<SimNode, SimLink>(simLinks)
         .id((d) => d.id)
         .distance((d) => {
           const sd = (d.source as SimNode).depth ?? 0;
           const td = (d.target as SimNode).depth ?? 0;
-          return Math.min(sd, td) === 0
-            ? (compact ? 80 : 120)
-            : (compact ? 50 : 80);
+          const minD = Math.min(sd, td);
+          if (minD === 0) return compact ? 70 : 110;
+          return compact ? 35 : 55;
         }))
       .force("charge", d3.forceManyBody<SimNode>()
-        .strength((d) => d.depth === 0
-          ? (compact ? -300 : -500)
-          : (compact ? -80 : -150)))
-      .force("center", d3.forceCenter(width / 2, height / 2))
-      .force("collide", d3.forceCollide<SimNode>((d) => nodeRadius(d, maxFlow) + 6));
+        .strength((d) => {
+          const base = d.depth === 0
+            ? (compact ? -300 : -500)
+            : (compact ? -60 : -120);
+          return base * chargeScale;
+        }))
+      .force("center", d3.forceCenter(width / 2, height / 2).strength(maxDepth > 2 ? 0.15 : 0.1))
+      .force("collide", d3.forceCollide<SimNode>((d) => nodeRadius(d, maxFlow) + 4));
 
     sim.on("tick", () => {
       link
@@ -195,7 +228,7 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
 
     (node as d3.Selection<SVGCircleElement, SimNode, SVGGElement, unknown>).call(drag);
 
-    // Click-to-navigate via native pointerdown/pointerup tracking
+    // Click-to-navigate via native pointer tracking (bypasses D3 drag click suppression)
     const pointerStarts = new Map<number, { x: number; y: number }>();
     node.each(function (_d) {
       const el = this as unknown as SVGCircleElement;
@@ -218,7 +251,7 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
     // Zoom
     svg.call(
       d3.zoom<SVGSVGElement, unknown>()
-        .scaleExtent([0.3, 4])
+        .scaleExtent([0.2, 5])
         .on("zoom", (event) => {
           g.attr("transform", event.transform.toString());
         }),
@@ -228,7 +261,7 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
   }, [data, width, height]);
 
   return (
-    <div className="graph-wrap">
+    <div style={{ position: "relative" }}>
       <svg ref={svgRef} />
       <div ref={tooltipRef} className="tooltip" style={{ display: "none" }} />
     </div>

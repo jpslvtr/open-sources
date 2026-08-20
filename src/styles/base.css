@@ -39,9 +39,29 @@ input {
 
 /* Layout */
 .page {
-  max-width: 520px;
+  max-width: 800px;
   margin: 0 auto;
-  padding: 2.5rem 1.25rem 5rem;
+  padding: 2.5rem 1.5rem 5rem;
+}
+
+/* Breadcrumb */
+.breadcrumb {
+  font-size: 11px;
+  color: var(--fg4);
+  margin-bottom: 1.25rem;
+}
+
+.breadcrumb a {
+  color: var(--fg3);
+  transition: color 0.15s;
+}
+
+.breadcrumb a:hover {
+  color: var(--fg);
+}
+
+.breadcrumb-sep {
+  margin: 0 0.375rem;
 }
 
 /* Section header pattern */
@@ -140,6 +160,15 @@ input {
   color: var(--fg);
 }
 
+.btn:disabled {
+  cursor: default;
+}
+
+.btn:disabled:hover {
+  border-color: var(--border);
+  color: var(--fg3);
+}
+
 /* Table */
 .data-table {
   width: 100%;
@@ -225,9 +254,9 @@ input {
 
 /* Graph page */
 .graph-page {
-  max-width: 900px;
+  max-width: 1100px;
   margin: 0 auto;
-  padding: 1.5rem 1.25rem 3rem;
+  padding: 1.5rem 1.5rem 3rem;
 }
 
 .graph-wrap {
@@ -237,6 +266,48 @@ input {
 
 .graph-wrap svg {
   display: block;
+}
+
+/* Compact graph on entity page */
+.graph-preview {
+  position: relative;
+  border: 1px solid var(--border);
+  margin-bottom: 0.5rem;
+}
+
+.graph-preview svg {
+  display: block;
+}
+
+/* Depth selector */
+.depth-selector {
+  display: flex;
+  gap: 0;
+  border: 1px solid var(--border);
+}
+
+.depth-btn {
+  padding: 0.25rem 0.625rem;
+  font-size: 11px;
+  color: var(--fg3);
+  border: none;
+  border-right: 1px solid var(--border);
+  background: transparent;
+  transition: color 0.15s, background-color 0.15s;
+  cursor: pointer;
+}
+
+.depth-btn:last-child {
+  border-right: none;
+}
+
+.depth-btn:hover {
+  color: var(--fg);
+}
+
+.depth-btn.active {
+  color: var(--fg);
+  background: var(--bg2);
 }
 
 /* Tooltip */
@@ -249,4 +320,50 @@ input {
   white-space: nowrap;
   z-index: 100;
   pointer-events: none;
+  max-width: 400px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* Pagination */
+.pagination {
+  display: flex;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-top: 1.5rem;
+}
+
+.pagination-label {
+  font-size: 11px;
+  color: var(--fg4);
+  align-self: center;
+}
+
+/* Mobile */
+@media (max-width: 600px) {
+  .page {
+    padding: 1.5rem 1rem 4rem;
+  }
+
+  .graph-page {
+    padding: 1rem 0.75rem 2rem;
+  }
+
+  .stat-tiles {
+    flex-wrap: wrap;
+  }
+
+  .stat-tile {
+    min-width: calc(50% - 1px);
+  }
+
+  .data-table th,
+  .data-table td {
+    padding: 0.375rem 0.125rem;
+    font-size: 12px;
+  }
+
+  .tooltip {
+    max-width: 280px;
+  }
 }
