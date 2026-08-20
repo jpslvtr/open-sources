@@ -6,7 +6,7 @@ import { GraphPage } from "./pages/GraphPage";
 
 export default function App() {
   return (
-    <BrowserRouter>
+    <BrowserRouter basename="/open-sources">
       <ThemeToggle />
       <Routes>
         <Route path="/" element={<SearchPage />} />
