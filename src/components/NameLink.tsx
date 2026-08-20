@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import { normalizeName } from "../utils/normalize";
 
 interface NameLinkProps {
   entityId: string | null;
@@ -17,10 +18,11 @@ export function NameLink({ entityId, name }: NameLinkProps) {
     );
   }
 
-  // No entity ID - link to search for this name
+  // No FEC ID - link to a donor entity page by normalized name
+  const donorId = `name:${normalizeName(name)}`;
   return (
     <Link
-      to={`/?q=${encodeURIComponent(name)}`}
+      to={`/entity/${encodeURIComponent(donorId)}`}
       className="name-link"
     >
       {name}

@@ -34,10 +34,11 @@ export function entityStatsToTiles(stats: {
   totalReceived: number;
   totalGiven: number;
   contributionCount: number;
-}): Stat[] {
+}, entityType?: string): Stat[] {
+  const isIndividual = entityType === "individual";
   return [
     { value: formatCurrency(stats.totalReceived), label: "received" },
-    { value: formatCurrency(stats.totalGiven), label: "spent" },
+    { value: formatCurrency(stats.totalGiven), label: isIndividual ? "given" : "spent" },
     {
       value: stats.contributionCount > 0 ? stats.contributionCount.toLocaleString() : "-",
       label: "contributions",

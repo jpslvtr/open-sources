@@ -23,11 +23,17 @@ export function EntityPage() {
   const navigate = useNavigate();
   const entityId = id ? decodeURIComponent(id) : undefined;
   const { entity, stats, dataAsOf, loading, error } = useEntity(entityId);
-  const [direction, setDirection] = useState<"received" | "given">("received");
+  const isIndividualDonor = entityId?.startsWith("name:");
+  const [direction, setDirection] = useState<"received" | "given">(isIndividualDonor ? "given" : "received");
   const contributions = useContributions(entityId, direction);
-  const graphResult = useGraph(entityId, 1);
+  const graphResult = useGraph(isIndividualDonor ? undefined : entityId, 1);
   const graphContainerRef = useRef<HTMLDivElement>(null);
   const [graphWidth, setGraphWidth] = useState(700);
+
+  // Reset direction when navigating between entity types
+  useEffect(() => {
+    setDirection(isIndividualDonor ? "given" : "received");
+  }, [isIndividualDonor]);
 
   useEffect(() => {
     const el = graphContainerRef.current;
@@ -40,10 +46,8 @@ export function EntityPage() {
   }, []);
 
   const handleNodeClick = useCallback((nodeId: string) => {
-    if (nodeId.startsWith("fec:")) {
+    if (nodeId.startsWith("fec:") || nodeId.startsWith("name:")) {
       navigate(`/entity/${encodeURIComponent(nodeId)}`);
-    } else if (nodeId.startsWith("name:")) {
-      navigate(`/?q=${encodeURIComponent(nodeId.replace(/^name:/, ""))}`);
     }
   }, [navigate]);
 
@@ -78,6 +82,7 @@ export function EntityPage() {
     );
   }
 
+  const isIndividual = entity.type === "individual";
   const partyLabel = entity.party ? PARTY_LABELS[entity.party] ?? entity.party : null;
   const subtitle = [
     entity.type,
@@ -85,6 +90,10 @@ export function EntityPage() {
     entity.state,
     entity.office,
   ].filter(Boolean).join(" - ");
+
+  const displayAliases = entity.aliases.filter(
+    (a) => a.toUpperCase() !== entity.canonicalName.toUpperCase(),
+  );
 
   return (
     <div className="page">
@@ -109,49 +118,56 @@ export function EntityPage() {
         <div style={{ fontSize: "12px", color: "var(--fg3)", marginBottom: "0.25rem" }}>
           {subtitle}
         </div>
+        {displayAliases.length > 0 && (
+          <div style={{ fontSize: "11px", color: "var(--fg4)", marginBottom: "0.25rem" }}>
+            also appears as: {displayAliases.join("; ")}
+          </div>
+        )}
         <DataFreshness date={dataAsOf} />
       </div>
 
       {stats && (
-        <StatTiles stats={entityStatsToTiles(stats)} baseDelay={70} />
+        <StatTiles stats={entityStatsToTiles(stats, entity.type)} baseDelay={70} />
       )}
 
-      {/* Inline graph preview */}
-      <div className="fade-in" style={{ animationDelay: "105ms", marginBottom: "1.5rem" }}>
-        <div style={{
-          display: "flex", alignItems: "baseline", justifyContent: "space-between",
-          marginBottom: "0.5rem",
-        }}>
-          <span className="section-label">money network</span>
-          <Link
-            to={`/entity/${encodeURIComponent(entity.id)}/graph`}
-            className="btn"
-          >
-            expand
-          </Link>
+      {/* Inline graph preview - skip for individual donors (no committee to expand) */}
+      {!isIndividual && (
+        <div className="fade-in" style={{ animationDelay: "105ms", marginBottom: "1.5rem" }}>
+          <div style={{
+            display: "flex", alignItems: "baseline", justifyContent: "space-between",
+            marginBottom: "0.5rem",
+          }}>
+            <span className="section-label">money network</span>
+            <Link
+              to={`/entity/${encodeURIComponent(entity.id)}/graph`}
+              className="btn"
+            >
+              expand
+            </Link>
+          </div>
+          <div ref={graphContainerRef} className="graph-preview">
+            {graphResult.loading ? (
+              <div style={{ padding: "2rem" }}>
+                <SkeletonRows count={3} />
+              </div>
+            ) : graphResult.data && graphResult.data.nodes.length > 1 ? (
+              <NetworkGraph
+                data={graphResult.data}
+                onNodeClick={handleNodeClick}
+                width={graphWidth}
+                height={350}
+              />
+            ) : (
+              <div style={{
+                textAlign: "center", color: "var(--fg4)", fontSize: "12px",
+                padding: "2rem 0",
+              }}>
+                no network data
+              </div>
+            )}
+          </div>
         </div>
-        <div ref={graphContainerRef} className="graph-preview">
-          {graphResult.loading ? (
-            <div style={{ padding: "2rem" }}>
-              <SkeletonRows count={3} />
-            </div>
-          ) : graphResult.data && graphResult.data.nodes.length > 1 ? (
-            <NetworkGraph
-              data={graphResult.data}
-              onNodeClick={handleNodeClick}
-              width={graphWidth}
-              height={350}
-            />
-          ) : (
-            <div style={{
-              textAlign: "center", color: "var(--fg4)", fontSize: "12px",
-              padding: "2rem 0",
-            }}>
-              no network data
-            </div>
-          )}
-        </div>
-      </div>
+      )}
 
       {stats && stats.cycles.length > 0 && (
         <div className="fade-in" style={{ animationDelay: "140ms", marginBottom: "1.5rem" }}>
@@ -160,8 +176,9 @@ export function EntityPage() {
             {stats.cycles
               .sort((a, b) => b.cycle - a.cycle)
               .map((c) => {
-                const maxAmount = Math.max(...stats.cycles.map((cy) => cy.received));
-                const pct = maxAmount > 0 ? (c.received / maxAmount) * 100 : 0;
+                const cycleAmount = isIndividual ? c.given : c.received;
+                const maxAmount = Math.max(...stats.cycles.map((cy) => isIndividual ? cy.given : cy.received));
+                const pct = maxAmount > 0 ? (cycleAmount / maxAmount) * 100 : 0;
                 return (
                   <div key={c.cycle}>
                     <div style={{
@@ -172,7 +189,7 @@ export function EntityPage() {
                       marginBottom: "2px",
                     }}>
                       <span>{c.cycle}</span>
-                      <span>{formatCurrency(c.received)}</span>
+                      <span>{formatCurrency(cycleAmount)}</span>
                     </div>
                     <div className="bar-track">
                       <div className="bar-fill" style={{ width: `${pct}%` }} />

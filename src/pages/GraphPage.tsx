@@ -30,10 +30,8 @@ export function GraphPage() {
   }, []);
 
   const handleNodeClick = useCallback((nodeId: string) => {
-    if (nodeId.startsWith("fec:")) {
+    if (nodeId.startsWith("fec:") || nodeId.startsWith("name:")) {
       navigate(`/entity/${encodeURIComponent(nodeId)}`);
-    } else if (nodeId.startsWith("name:")) {
-      navigate(`/?q=${encodeURIComponent(nodeId.replace(/^name:/, ""))}`);
     }
   }, [navigate]);
 

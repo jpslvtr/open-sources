@@ -9,7 +9,6 @@ const PREFIXES = new Set([
   "LT", "CAPT", "MAJ", "COL", "GEN", "ADM",
 ]);
 
-// Parse "LAST, FIRST MI" or "FIRST LAST" into { first, last }
 function parseName(raw: string): { first: string; last: string } {
   if (raw.includes(",")) {
     const [last, ...rest] = raw.split(",");
@@ -23,7 +22,6 @@ function parseName(raw: string): { first: string; last: string } {
   return { first, last };
 }
 
-// Remove single-letter middle initials (with or without period)
 function stripMiddleInitials(name: string): string {
   const parts = name.split(/\s+/);
   if (parts.length <= 1) return name;
@@ -32,38 +30,42 @@ function stripMiddleInitials(name: string): string {
   return [parts[0], ...parts.slice(1).filter((p) => p.replace(/\.$/, "").length > 1)].join(" ");
 }
 
-// Normalize a raw name string into a canonical form for matching
+// Normalize a personal name into a canonical "FIRST LAST" form for matching.
+// Strips prefixes (Dr, Mr, etc.), suffixes (Jr, III, MD, etc.), and middle initials.
 export function normalizeName(raw: string): string {
   let name = raw.toUpperCase().trim();
-
-  // Strip punctuation except commas (needed for parsing) and hyphens (part of names)
   name = name.replace(/[^A-Z\s,\-]/g, "");
 
   const { first, last } = parseName(name);
 
-  // Remove prefixes and suffixes
   const firstParts = first.split(/\s+/).filter((p) => !PREFIXES.has(p) && !SUFFIXES.has(p));
   const lastParts = last.split(/\s+/).filter((p) => !SUFFIXES.has(p));
 
   let cleanFirst = firstParts.join(" ");
   const cleanLast = lastParts.join(" ");
 
-  // Strip middle initials from first name portion
   cleanFirst = stripMiddleInitials(cleanFirst);
 
-  // Canonical form: "FIRST LAST"
   const canonical = [cleanFirst, cleanLast].filter(Boolean).join(" ").trim();
-  // Collapse multiple spaces
   return canonical.replace(/\s+/g, " ");
 }
 
-// Generate a stable key for cache/index lookups
+// Normalize an entity name, choosing strategy by type.
+// Personal names get full normalization. Organizational names (committees)
+// only get whitespace/punctuation cleanup without LAST,FIRST reordering.
+export function normalizeEntityName(raw: string, type: string): string {
+  if (type === "committee" || type === "organization") {
+    return raw.toUpperCase().trim().replace(/[^A-Z0-9\s\-&]/g, "").replace(/\s+/g, " ");
+  }
+  return normalizeName(raw);
+}
+
+// Stable key for cache/index lookups - letters only, lowercase
 export function nameKey(normalized: string): string {
   return normalized.toLowerCase().replace(/[^a-z]/g, "");
 }
 
-// Levenshtein distance for fuzzy matching
-export function levenshtein(a: string, b: string): number {
+function levenshtein(a: string, b: string): number {
   const m = a.length;
   const n = b.length;
   const dp: number[][] = Array.from({ length: m + 1 }, () => Array(n + 1).fill(0));
@@ -79,7 +81,7 @@ export function levenshtein(a: string, b: string): number {
   return dp[m][n];
 }
 
-// Similarity score between 0 and 1
+// Similarity score between two names, 0 to 1. Normalizes both before comparing.
 export function nameSimilarity(a: string, b: string): number {
   const na = normalizeName(a);
   const nb = normalizeName(b);
@@ -89,15 +91,14 @@ export function nameSimilarity(a: string, b: string): number {
   return 1 - levenshtein(na, nb) / maxLen;
 }
 
-// Score how likely two records refer to the same entity
-// Returns 0-1 where higher = more likely same entity
+// Score how likely two records refer to the same entity. Returns 0-1.
+// Combines name similarity with metadata boosts for state, employer, occupation, zip.
 export function entityMatchScore(
   a: { name: string; state?: string; employer?: string; occupation?: string; zip?: string },
   b: { name: string; state?: string; employer?: string; occupation?: string; zip?: string },
 ): number {
   let score = nameSimilarity(a.name, b.name);
 
-  // Boost for matching metadata
   if (a.state && b.state && a.state === b.state) score += 0.05;
   if (a.employer && b.employer) {
     const empSim = nameSimilarity(a.employer, b.employer);
