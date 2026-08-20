@@ -1,4 +1,4 @@
-import type { SearchResponse, EntityResponse, ContributionsResponse, GraphResponse } from "../types/api";
+import type { SearchResponse, EntityResponse, ContributionsResponse, GraphResponse, GraphNode, GraphEdge } from "../types/api";
 import type { SearchFilters, Party } from "../types/entities";
 
 const FEC_BASE = "https://api.open.fec.gov/v1";

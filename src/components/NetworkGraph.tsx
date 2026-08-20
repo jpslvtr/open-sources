@@ -193,15 +193,17 @@ export function NetworkGraph({ data, onNodeClick, width, height }: Props) {
         d.fy = null;
       });
 
-    node.call(drag);
+    (node as d3.Selection<SVGCircleElement, SimNode, SVGGElement, unknown>).call(drag);
 
     // Click-to-navigate via native pointerdown/pointerup tracking
     const pointerStarts = new Map<number, { x: number; y: number }>();
-    node.each(function (d) {
-      this.addEventListener("pointerdown", (e: PointerEvent) => {
+    node.each(function (_d) {
+      const el = this as unknown as SVGCircleElement;
+      const d = _d;
+      el.addEventListener("pointerdown", (e: PointerEvent) => {
         pointerStarts.set(e.pointerId, { x: e.clientX, y: e.clientY });
       });
-      this.addEventListener("pointerup", (e: PointerEvent) => {
+      el.addEventListener("pointerup", (e: PointerEvent) => {
         const start = pointerStarts.get(e.pointerId);
         pointerStarts.delete(e.pointerId);
         if (!start) return;
