@@ -49,11 +49,21 @@ async function fecFetch<T>(path: string, params: Record<string, string> = {}, tt
   for (const [k, v] of Object.entries(params)) {
     if (v) url.searchParams.set(k, v);
   }
-  const res = await fetch(url.toString());
-  if (!res.ok) throw new Error(`FEC API ${res.status}`);
-  const data: FecResponse<T> = await res.json();
-  cacheSet(key, data, ttl);
-  return data;
+
+  let lastError: Error | null = null;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    if (attempt > 0) await new Promise((r) => setTimeout(r, 1000 * 2 ** attempt));
+    const res = await fetch(url.toString());
+    if (res.status === 429) {
+      lastError = new Error("FEC API rate limit - retrying");
+      continue;
+    }
+    if (!res.ok) throw new Error(`FEC API ${res.status}`);
+    const data: FecResponse<T> = await res.json();
+    cacheSet(key, data, ttl);
+    return data;
+  }
+  throw lastError ?? new Error("FEC API request failed");
 }
 
 export async function search(params: {
